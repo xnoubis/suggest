@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type, Schema, FunctionDeclaration } from "@google/genai";
+import { GoogleGenAI, Type, Schema } from "@google/genai";
 import { Message, AnalysisResult, Suggestion, SuggestionType } from "../types";
 
 const SYSTEM_INSTRUCTION_ANALYSIS = `
@@ -11,7 +11,7 @@ Principles:
    - Clarification (Ambiguity?)
    - Expansion (Depth available?)
    - Creation (Artifact needed?)
-   - Connection (Related to previous topic?)
+   - Connection (Related to previous topic? New context needed?)
    - Challenge (Is there a dialectical opposite?)
    - Crystallization (Can we summarize the core essence?)
 
@@ -22,20 +22,6 @@ Output MUST be a JSON object with:
 - dialecticalOpportunity: description of a potential counter-point
 - suggestions: Array of exactly 5 suggestions covering different types from [Clarify, Expand, Create, Connect, Challenge, Crystallize].
 `;
-
-// Define the mock Drive Search tool for the "Create/Connect" agentic capabilities
-const searchDriveTool: FunctionDeclaration = {
-  name: 'searchDrive',
-  description: 'Search the user\'s Google Drive for relevant documents.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {
-      query: { type: Type.STRING, description: 'The search query.' },
-      fileType: { type: Type.STRING, description: 'Optional file type filter (docs, sheets, slides).' }
-    },
-    required: ['query']
-  }
-};
 
 const analysisSchema: Schema = {
   type: Type.OBJECT,
@@ -66,13 +52,11 @@ export class GeminiService {
   private ai: GoogleGenAI;
 
   constructor() {
-    // Assuming API Key is available in process.env.API_KEY as per instructions
     this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   }
 
   async analyzeContext(history: Message[], lastInput: string): Promise<AnalysisResult> {
     try {
-      // We use Flash for rapid analysis
       const model = 'gemini-2.5-flash';
       
       const historyText = history.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
@@ -85,7 +69,7 @@ export class GeminiService {
           systemInstruction: SYSTEM_INSTRUCTION_ANALYSIS,
           responseMimeType: "application/json",
           responseSchema: analysisSchema,
-          temperature: 0.3, // Low temperature for consistent analysis
+          temperature: 0.3,
         }
       });
 
@@ -103,27 +87,24 @@ export class GeminiService {
     suggestion: Suggestion, 
     history: Message[], 
     lastInput: string
-  ): Promise<{ text: string, modelUsed: string }> {
+  ): Promise<{ text: string, modelUsed: string, sourceUrls?: { title: string, uri: string }[] }> {
     try {
       let model = 'gemini-2.5-flash';
       let config: any = {
         temperature: 0.7,
       };
 
-      const isComplex = ['Create', 'Challenge', 'Crystallize'].includes(suggestion.type);
-      const needsSearch = suggestion.type === 'Expand' || suggestion.type === 'Connect';
-
-      if (isComplex) {
-        // Use Pro + Thinking for complex tasks
+      // Configuration logic based on suggestion type
+      if (['Create', 'Challenge', 'Crystallize'].includes(suggestion.type)) {
+        // High cognitive load -> Thinking Model
         model = 'gemini-3-pro-preview';
-        config.thinkingConfig = { thinkingBudget: 32768 }; // Max budget as requested
-      } else if (needsSearch) {
-        // Use Flash + Search for information retrieval
+        config.thinkingConfig = { thinkingBudget: 32768 };
+      } else if (['Expand', 'Connect'].includes(suggestion.type)) {
+        // Information retrieval -> Google Search
         model = 'gemini-2.5-flash'; 
-        // Note: guidelines prohibit mixing googleSearch with functionDeclarations
-        config.tools = [{ functionDeclarations: [searchDriveTool] }];
+        config.tools = [{ googleSearch: {} }];
       } else {
-         // Default flash for simple clarify
+         // 'Clarify' or fallback -> Fast Model
          model = 'gemini-2.5-flash';
       }
 
@@ -132,16 +113,19 @@ export class GeminiService {
         Type: ${suggestion.type}
         Title: ${suggestion.title}
         Description: ${suggestion.description}
+        Reasoning: ${suggestion.reasoning}
         
         CONTEXT:
         ${history.map(m => `${m.role}: ${m.content}`).join('\n')}
         USER: ${lastInput}
         
         INSTRUCTIONS:
-        Perform the suggested action comprehensively. 
-        If the type is 'Create', provide the code or artifact clearly.
-        If 'Challenge', be dialectical and offer the antithesis.
-        If 'Crystallize', summarize the essence.
+        Perform the suggested action comprehensively.
+        - If 'Create': Provide the full code, text, or artifact.
+        - If 'Challenge': Provide a dialectical antithesis or counter-argument.
+        - If 'Crystallize': Distill the conversation into its core essence/insight.
+        - If 'Expand'/'Connect': Use search tools if needed to provide accurate, up-to-date context.
+        - If 'Clarify': Ask the necessary questions to resolve ambiguity.
       `;
 
       const response = await this.ai.models.generateContent({
@@ -150,32 +134,25 @@ export class GeminiService {
         config: config
       });
 
-      // Handle function calling (Mocking Drive Search)
-      // Note: In a real app we would loop, here we simplify to one turn of tools or text
-      if (response.candidates?.[0]?.content?.parts?.[0]?.functionCall) {
-         const fc = response.candidates[0].content.parts[0].functionCall;
-         if (fc.name === 'searchDrive') {
-            // Mock response
-            const mockFiles = [
-               { title: "Project Alpha Specs.pdf", snippet: "Specs for the new engine..." },
-               { title: "Meeting Notes 2024.docx", snippet: "Discussed Q4 goals..." }
-            ];
-            // Feed back to model (simplified for this artifact: just append to prompt and re-run)
-            const followUpPrompt = `${taskPrompt}\n\nTOOL RESULT (searchDrive): Found files: ${JSON.stringify(mockFiles)}. Incorporate this into your answer.`;
-            
-            const followUpResponse = await this.ai.models.generateContent({
-              model,
-              contents: followUpPrompt,
-              config: {
-                // Strip tools for final answer to avoid loops in this simple implementation
-                thinkingConfig: isComplex ? { thinkingBudget: 16000 } : undefined 
-              }
+      // Extract search grounding if present
+      const sourceUrls: { title: string, uri: string }[] = [];
+      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
+      if (chunks) {
+        chunks.forEach((chunk: any) => {
+          if (chunk.web?.uri) {
+            sourceUrls.push({
+              title: chunk.web.title || "Source",
+              uri: chunk.web.uri
             });
-            return { text: followUpResponse.text || "Error processing tool result.", modelUsed: model };
-         }
+          }
+        });
       }
 
-      return { text: response.text || "No response generated.", modelUsed: model };
+      return { 
+        text: response.text || "No response generated.", 
+        modelUsed: model,
+        sourceUrls: sourceUrls.length > 0 ? sourceUrls : undefined
+      };
     } catch (error) {
       console.error("Execution failed:", error);
       return { text: "Error executing suggestion. Please try again.", modelUsed: "error" };

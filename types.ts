@@ -8,6 +8,7 @@ export interface Message {
     suggestionType?: SuggestionType;
     executionTime?: number;
     modelUsed?: string;
+    sourceUrls?: { title: string; uri: string }[];
   };
 }
 

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Message } from '../types';
-import { UserCircleIcon, CpuChipIcon } from '@heroicons/react/24/solid';
+import { UserCircleIcon, CpuChipIcon, LinkIcon } from '@heroicons/react/24/solid';
 import ReactMarkdown from 'react-markdown';
 
 interface ChatAreaProps {
@@ -41,7 +41,7 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ messages, isTyping }) => {
           )}
           
           <div className={`
-            max-w-[85%] md:max-w-[75%] rounded-2xl px-5 py-4 shadow-lg
+            max-w-[85%] md:max-w-[75%] rounded-2xl px-5 py-4 shadow-lg flex flex-col gap-2
             ${msg.role === 'user' 
               ? 'bg-slate-700 text-white rounded-br-none' 
               : 'bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700'}
@@ -49,8 +49,32 @@ export const ChatArea: React.FC<ChatAreaProps> = ({ messages, isTyping }) => {
              <div className="prose prose-invert prose-sm max-w-none">
               <ReactMarkdown>{msg.content}</ReactMarkdown>
              </div>
+             
+             {/* Source Metadata Display */}
+             {msg.metadata?.sourceUrls && msg.metadata.sourceUrls.length > 0 && (
+               <div className="mt-2 pt-2 border-t border-white/10">
+                 <div className="flex items-center gap-1 text-xs text-slate-400 mb-1">
+                   <LinkIcon className="w-3 h-3" />
+                   <span className="font-bold uppercase tracking-wider">Sources</span>
+                 </div>
+                 <div className="grid grid-cols-1 gap-1">
+                   {msg.metadata.sourceUrls.map((source, idx) => (
+                     <a 
+                       key={idx} 
+                       href={source.uri} 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       className="text-xs text-mycelium-400 hover:text-mycelium-300 hover:underline truncate block"
+                     >
+                       {source.title || source.uri}
+                     </a>
+                   ))}
+                 </div>
+               </div>
+             )}
+
              {msg.metadata?.suggestionType && (
-               <div className="mt-2 pt-2 border-t border-white/10 flex items-center gap-2">
+               <div className="mt-1 pt-2 border-t border-white/10 flex items-center gap-2">
                  <span className="text-[10px] uppercase tracking-wider font-bold text-mycelium-400">
                    Executed: {msg.metadata.suggestionType}
                  </span>

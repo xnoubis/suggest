@@ -53,7 +53,7 @@ const App: React.FC = () => {
       try {
         const response = await geminiService.executeSuggestion(
             { type: 'Expand', title: 'Reply', description: 'Standard reply', reasoning: 'Engine off', confidence: 1, id: 'std' },
-            messagesRef.current, // Use ref to get latest including new user msg if React batched updates happened (though locally we use local var usually)
+            messagesRef.current, 
             userMsg.content
         );
          setMessages(prev => [...prev, {
@@ -61,7 +61,10 @@ const App: React.FC = () => {
           role: 'model',
           content: response.text,
           timestamp: Date.now(),
-          metadata: { modelUsed: response.modelUsed }
+          metadata: { 
+            modelUsed: response.modelUsed,
+            sourceUrls: response.sourceUrls
+          }
         }]);
       } finally {
         setEngineState(prev => ({ ...prev, isExecuting: false }));
@@ -76,7 +79,7 @@ const App: React.FC = () => {
     try {
       // 1. Analyze
       const analysis = await geminiService.analyzeContext(
-        [...messagesRef.current], // History *excluding* the one we just added? No, we need context.
+        [...messagesRef.current], 
         lastUserMessage.content
       );
 
@@ -104,10 +107,16 @@ const App: React.FC = () => {
     addLog('Weaving response...', 'info');
 
     try {
+      // Logic: History is everything up to the last user message, which is the last message in array.
+      // But wait, if user sent message, then engine analyzed. Array is [..., UserMsg].
+      // So history is messagesRef.current.slice(0, -1). Last input is messagesRef.current.last.
+      const lastMsg = messagesRef.current[messagesRef.current.length - 1];
+      const history = messagesRef.current.slice(0, -1);
+
       const result = await geminiService.executeSuggestion(
         suggestion,
-        messagesRef.current.slice(0, -1), // History
-        messagesRef.current[messagesRef.current.length - 1].content // Last input
+        history,
+        lastMsg.content
       );
 
       setMessages(prev => [...prev, {
@@ -117,7 +126,8 @@ const App: React.FC = () => {
         timestamp: Date.now(),
         metadata: {
           suggestionType: suggestion.type,
-          modelUsed: result.modelUsed
+          modelUsed: result.modelUsed,
+          sourceUrls: result.sourceUrls
         }
       }]);
       
@@ -228,7 +238,7 @@ const App: React.FC = () => {
           
           {/* Status Footer */}
           <div className="p-3 bg-slate-900 border-t border-slate-800 text-[10px] text-slate-500 flex justify-between font-mono">
-            <span>BUDGET: 32K (PRO)</span>
+            <span>MODELS: 2.5 FLASH / 3 PRO</span>
             <span>STATUS: {engineState.isExecuting ? 'EXECUTING' : engineState.isAnalyzing ? 'ANALYZING' : 'IDLE'}</span>
           </div>
         </div>
