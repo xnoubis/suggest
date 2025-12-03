@@ -1,0 +1,5 @@
+{
+  "name": "Mycelial Suggestion Engine",
+  "description": "An agentic chat interface that analyzes conversation patterns to generate active recommendations (Clarify, Expand, Create, Connect, Challenge, Crystallize) using Gemini models.",
+  "requestFramePermissions": []
+}
